@@ -2,17 +2,5 @@
   "framework": "nextjs",
   "buildCommand": "npm run build",
   "devCommand": "npm run dev",
-  "installCommand": "npm install",
-  "env": {
-    "NEXT_PUBLIC_SUPABASE_URL": "@supabase-url",
-    "NEXT_PUBLIC_SUPABASE_ANON_KEY": "@supabase-anon-key",
-    "ANTHROPIC_API_KEY": "@anthropic-api-key",
-    "GOOGLE_CLIENT_ID": "@google-client-id",
-    "GOOGLE_CLIENT_SECRET": "@google-client-secret",
-    "GOOGLE_REFRESH_TOKEN": "@google-refresh-token",
-    "ICLOUD_CALENDAR_URL": "@icloud-calendar-url",
-    "GMAIL_ADDRESS": "@gmail-address",
-    "NISHKA_EMAIL": "@nishka-email",
-    "DASHBOARD_URL": "@dashboard-url"
-  }
+  "installCommand": "npm install"
 }
