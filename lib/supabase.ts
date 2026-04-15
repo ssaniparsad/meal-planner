@@ -1,9 +1,5 @@
-import { createClient } from '@supabase/supabase-js'
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-
-export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+// Note: Supabase client is NOT initialised here — each API route creates its own
+// lazy instance via createClient() so the build succeeds without valid env vars.
 
 // Types
 export type MealSlot = 'breakfast' | 'lunch' | 'dinner'
