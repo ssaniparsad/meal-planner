@@ -1,7 +1,12 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  serverExternalPackages: [
+    'googleapis',
+    'google-auth-library',
+    'node-ical',
+    'nodemailer',
+  ],
 };
 
 export default nextConfig;
