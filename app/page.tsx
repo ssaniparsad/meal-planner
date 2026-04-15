@@ -1,65 +1,246 @@
-import Image from "next/image";
+'use client'
 
-export default function Home() {
+import { useState, useEffect, useCallback } from 'react'
+import WeekGrid from '@/components/WeekGrid'
+import ShoppingList from '@/components/ShoppingList'
+import SuggestionPanel from '@/components/SuggestionPanel'
+import type { MealPlan, ShoppingItem, MealSlot } from '@/lib/supabase'
+import { getWeekStart } from '@/lib/supabase'
+import { format, addWeeks, subWeeks, parseISO } from 'date-fns'
+
+export default function DashboardPage() {
+  const [weekStart, setWeekStart] = useState(() => getWeekStart())
+  const [meals, setMeals] = useState<MealPlan[]>([])
+  const [shoppingItems, setShoppingItems] = useState<ShoppingItem[]>([])
+  const [ingredientGaps, setIngredientGaps] = useState<{ meal: string; missingIngredients: string[] }[]>([])
+  const [loadingMeals, setLoadingMeals] = useState(true)
+  const [generatingSuggestions, setGeneratingSuggestions] = useState(false)
+  const [generatingShopping, setGeneratingShopping] = useState(false)
+
+  const suggestedMeals = meals.filter(m => m.is_suggested && !m.approved)
+
+  // Fetch meals for current week
+  const fetchMeals = useCallback(async (week: string) => {
+    setLoadingMeals(true)
+    const res = await fetch(`/api/meals?week=${week}`)
+    const data = await res.json()
+    setMeals(data.meals ?? [])
+    setLoadingMeals(false)
+  }, [])
+
+  // Fetch shopping list for current week
+  const fetchShopping = useCallback(async (week: string) => {
+    const res = await fetch(`/api/shopping?week=${week}`)
+    const data = await res.json()
+    setShoppingItems(data.items ?? [])
+  }, [])
+
+  // Fetch ingredient gaps
+  const fetchGaps = useCallback(async (week: string) => {
+    const res = await fetch(`/api/generate-shopping?week=${week}`)
+    const data = await res.json()
+    setIngredientGaps(data.gaps ?? [])
+  }, [])
+
+  useEffect(() => {
+    fetchMeals(weekStart)
+    fetchShopping(weekStart)
+    fetchGaps(weekStart)
+  }, [weekStart, fetchMeals, fetchShopping, fetchGaps])
+
+  // Week navigation
+  const goToPrevWeek = () => setWeekStart(w => format(subWeeks(parseISO(w), 1), 'yyyy-MM-dd'))
+  const goToNextWeek = () => setWeekStart(w => format(addWeeks(parseISO(w), 1), 'yyyy-MM-dd'))
+  const goToCurrentWeek = () => setWeekStart(getWeekStart())
+
+  // Save a meal
+  const handleSaveMeal = async (dayIndex: number, slot: MealSlot, name: string) => {
+    if (!name) return
+    const res = await fetch('/api/meals', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ week_start: weekStart, day_of_week: dayIndex, meal_slot: slot, meal_name: name }),
+    })
+    const data = await res.json()
+    if (data.meal) {
+      setMeals(prev => {
+        const filtered = prev.filter(m => !(m.day_of_week === dayIndex && m.meal_slot === slot))
+        return [...filtered, data.meal]
+      })
+      // Refresh gaps after adding a meal
+      fetchGaps(weekStart)
+    }
+  }
+
+  // Delete a meal
+  const handleDeleteMeal = async (id: string) => {
+    await fetch(`/api/meals?id=${id}`, { method: 'DELETE' })
+    setMeals(prev => prev.filter(m => m.id !== id))
+    fetchGaps(weekStart)
+  }
+
+  // Generate AI suggestions
+  const handleGenerateSuggestions = async () => {
+    setGeneratingSuggestions(true)
+    const res = await fetch('/api/suggest', { method: 'POST' })
+    const data = await res.json()
+    if (data.suggestions) {
+      // Move to next week to see suggestions
+      const nextWeek = format(addWeeks(parseISO(weekStart), 1), 'yyyy-MM-dd')
+      setWeekStart(nextWeek)
+    }
+    setGeneratingSuggestions(false)
+  }
+
+  // Approve a suggestion
+  const handleApproveSuggestion = async (id: string) => {
+    await fetch('/api/meals', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, approved: true }),
+    })
+    setMeals(prev => prev.map(m => m.id === id ? { ...m, approved: true } : m))
+  }
+
+  // Approve all suggestions
+  const handleApproveAll = async () => {
+    await Promise.all(suggestedMeals.map(m => handleApproveSuggestion(m.id)))
+  }
+
+  // Dismiss a suggestion
+  const handleDismissSuggestion = async (id: string) => {
+    await fetch(`/api/meals?id=${id}`, { method: 'DELETE' })
+    setMeals(prev => prev.filter(m => m.id !== id))
+  }
+
+  // Shopping list actions
+  const handleToggleItem = async (id: string, checked: boolean) => {
+    await fetch('/api/shopping', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, checked }),
+    })
+    setShoppingItems(prev => prev.map(i => i.id === id ? { ...i, checked } : i))
+  }
+
+  const handleAddItem = async (item: string) => {
+    const res = await fetch('/api/shopping', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ week_start: weekStart, item }),
+    })
+    const data = await res.json()
+    if (data.item) setShoppingItems(prev => [...prev, data.item])
+  }
+
+  const handleDeleteItem = async (id: string) => {
+    await fetch(`/api/shopping?id=${id}`, { method: 'DELETE' })
+    setShoppingItems(prev => prev.filter(i => i.id !== id))
+  }
+
+  const handleGenerateShopping = async () => {
+    setGeneratingShopping(true)
+    const res = await fetch('/api/generate-shopping', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ week_start: weekStart }),
+    })
+    const data = await res.json()
+    if (data.items) {
+      await fetchShopping(weekStart)
+      if (data.gaps) setIngredientGaps(data.gaps)
+    }
+    setGeneratingShopping(false)
+  }
+
+  const isCurrentWeek = weekStart === getWeekStart()
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-violet-50/30">
+      {/* Header */}
+      <header className="sticky top-0 z-10 bg-white/80 backdrop-blur-md border-b border-slate-100">
+        <div className="max-w-screen-2xl mx-auto px-6 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <span className="text-2xl">🍽️</span>
+            <div>
+              <h1 className="text-lg font-bold text-slate-800">Meal Planner</h1>
+              <p className="text-xs text-slate-400">Sheylyn & Nishka</p>
+            </div>
+          </div>
+
+          {/* Week navigation */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={goToPrevWeek}
+              className="p-2 rounded-lg hover:bg-slate-100 text-slate-500 transition-colors"
             >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
+              ‹
+            </button>
+            <button
+              onClick={goToCurrentWeek}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                isCurrentWeek
+                  ? 'bg-violet-600 text-white'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
             >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+              {isCurrentWeek ? 'This Week' : format(parseISO(weekStart), 'dd MMM')}
+            </button>
+            <button
+              onClick={goToNextWeek}
+              className="p-2 rounded-lg hover:bg-slate-100 text-slate-500 transition-colors"
+            >
+              ›
+            </button>
+          </div>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
+      </header>
+
+      {/* Main content */}
+      <main className="max-w-screen-2xl mx-auto px-6 py-8 space-y-6">
+        {/* AI Suggestions banner */}
+        <SuggestionPanel
+          suggestedMeals={suggestedMeals}
+          onApprove={handleApproveSuggestion}
+          onApproveAll={handleApproveAll}
+          onDismiss={handleDismissSuggestion}
+        />
+
+        {/* Two-column layout */}
+        <div className="grid grid-cols-1 xl:grid-cols-[1fr_340px] gap-6">
+          {/* Meal grid */}
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
+            {loadingMeals ? (
+              <div className="flex items-center justify-center h-48 text-slate-400">
+                <span className="inline-block w-6 h-6 border-2 border-slate-200 border-t-violet-500 rounded-full animate-spin mr-3" />
+                Loading meals...
+              </div>
+            ) : (
+              <WeekGrid
+                weekStart={weekStart}
+                meals={meals}
+                ingredientGaps={ingredientGaps}
+                onSaveMeal={handleSaveMeal}
+                onDeleteMeal={handleDeleteMeal}
+                onGenerateSuggestions={handleGenerateSuggestions}
+                generating={generatingSuggestions}
+              />
+            )}
+          </div>
+
+          {/* Shopping list */}
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
+            <ShoppingList
+              items={shoppingItems}
+              onToggle={handleToggleItem}
+              onAdd={handleAddItem}
+              onDelete={handleDeleteItem}
+              onGenerateFromMeals={handleGenerateShopping}
+              generating={generatingShopping}
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+          </div>
         </div>
       </main>
     </div>
-  );
+  )
 }
